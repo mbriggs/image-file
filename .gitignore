@@ -1,0 +1,9 @@
+.env
+dist
+node_modules
+src/**/*.d.ts
+src/**/*.js
+examples/**/*.d.ts
+examples/**/*.js
+tests/**/*.d.ts
+tests/**/*.js
