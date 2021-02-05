@@ -2,11 +2,17 @@ import path from "path";
 import fs from "fs";
 
 import * as tempy from "tempy";
+import { flatten } from "lodash";
 import execa from "execa";
 
 import { ImageFileReadError, InvalidImageFileError } from "./errors";
+import { Changeset } from "@mbriggs/image-file/changeset";
 
 export class ImageFile {
+  static mogrify = "mogrify";
+  static convert = "convert";
+  static identify = "identify";
+
   static tempfiles = [];
 
   static async unlinkAll() {
@@ -26,9 +32,8 @@ export class ImageFile {
   }
 
   static async open(imagePath: string, name?: string, source?: ImageFile): Promise<ImageFile> {
-    let base = path.basename(imagePath);
+    let temp = tempfile(imagePath);
 
-    let temp = tempy.file({ name: base });
     this.tempfiles.push(temp);
 
     await fs.promises.copyFile(imagePath, temp, fs.constants.COPYFILE_FICLONE);
@@ -46,8 +51,10 @@ export class ImageFile {
 
   static async follow(file: ImageFile, name?: string): Promise<ImageFile> {
     let next = await this.open(file.filePath, name, file);
+    next.source = file;
+    next.name = name;
 
-    return file;
+    return next;
   }
 
   name: string;
@@ -115,9 +122,37 @@ export class ImageFile {
     }
   }
 
+  async apply(changeset: Changeset, inPlace = false) {
+    let changes = flatten(changeset.changes);
+    let result: ImageFile;
+
+    if (inPlace) {
+      let command = ImageFile.mogrify;
+      changes.push(this.path);
+
+      await execa(command, changes);
+
+      result = await ImageFile.read(this.path, this.name);
+      result.source = this.source;
+      await this.unlink();
+    } else {
+      let command = ImageFile.convert;
+      let dest = tempfile(this.path);
+      changes = [this.path].concat(changes);
+      changes.push(dest);
+
+      await execa(command, changes);
+
+      result = await ImageFile.read(dest, this.name);
+      result.source = this;
+    }
+
+    return result;
+  }
+
   async identify(args = [], multiLine = true) {
     args.push(this.path);
-    let { stdout } = await execa("identify", args);
+    let { stdout } = await execa(ImageFile.identify, args);
 
     let lines = stdout.split("\n");
 
@@ -131,4 +166,10 @@ export class ImageFile {
   async unlink() {
     await fs.promises.unlink(this.filePath);
   }
+}
+
+function tempfile(source: string) {
+  let base = path.basename(source);
+  let temp = tempy.file({ name: base });
+  return temp;
 }
